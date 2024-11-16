@@ -24,6 +24,143 @@ from llava.constants import IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_TOKEN, DEFAULT_IM_S
 from transformers import TextIteratorStreamer
 from threading import Thread
 
+import cv2
+import numpy as np
+import base64
+import os
+from openai import OpenAI
+
+class PersonalInfoMasker:
+    def _init_(self):
+        # self.client = OpenAI(api_key="")
+        # self.api_key = ""
+        self._input_text = ""
+        self._masked_text = ""
+
+    # Getter for input_text
+    def get_input_text(self):
+        return self._input_text
+    
+    # Setter for input_text
+    def set_input_text(self, input_text):
+        self._input_text = input_text
+
+    # Getter for masked_text
+    def get_masked_text(self):
+        return self._masked_text
+
+
+    # Function to process text with GPT and mask PII
+    def process_text(self):
+        if not self._input_text:
+            raise ValueError("Input text is empty. Set input text before processing.")
+        
+        input_text_cleaned = self._input_text.strip()
+        
+        api_key = os.getenv("OPENAI_API_KEY")
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+        # Updated data and messages structure
+        data = {
+            "model": "gpt-4",
+            "messages": [
+                {
+                "role": "system", 
+                "content": "You are a private information obfuscator. Replace sensitive information with '*'."  # System instruction
+                },
+                {
+                "role": "user", 
+                "content": f"Anonymize this text:\n\n{input_text_cleaned}"  # The user input
+                }
+                ],
+        }
+        
+        
+        response = requests.post(url, headers=headers, json=data)
+        # Parse the response JSON
+        response_json = response.json()
+
+        # Extract the GPT-4's output (try printing the raw response for debugging)
+        choices = response_json['choices'][0]
+
+        # Return the content from the response
+        return str(choices['message']['content'])
+    
+import cv2
+import numpy as np
+import base64
+
+class ImageObfuscator:
+    def __init__(self, noise_level=0.05):
+        self._image = None
+        self._obfuscated_image = None
+        self._noise_level = noise_level
+
+    def set_image(self, image):
+        if isinstance(image, str):
+            # Assume the string is a base64 encoded image
+            self._image = self._decode_base64_image(image)
+        elif isinstance(image, np.ndarray):
+            self._image = image
+        else:
+            raise ValueError("Input must be a string (base64 encoded image) or a numpy array")
+
+    def _decode_base64_image(self, base64_string):
+        # Remove the data URL prefix if present
+        if ',' in base64_string:
+            base64_string = base64_string.split(',')[1]
+        
+        # Decode the base64 string
+        image_data = base64.b64decode(base64_string)
+        
+        # Convert to numpy array
+        nparr = np.frombuffer(image_data, np.uint8)
+        
+        # Decode the image
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if image is None:
+            raise ValueError("Failed to decode the image")
+        
+        return image
+
+    def get_obfuscated_image(self):
+        return self._obfuscated_image
+
+    def add_noise(self):
+        if self._image is None:
+            raise ValueError("No image set")
+
+        # Create a noise array
+        noise = np.random.normal(0, self._noise_level * 255, self._image.shape).astype(np.uint8)
+        #noise = np.random.normal(0, self._noise_level, self._image.shape).astype(np.float32)
+        # Add noise to the image
+        self._obfuscated_image = cv2.add(self._image, noise)
+        #self._obfuscated_image = np.clip(self._image.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+ 
+
+    def get_obfuscated_image_base64(self):
+        if self._obfuscated_image is None:
+            raise ValueError("No obfuscated image available")
+        
+        _, buffer = cv2.imencode('.png', self._obfuscated_image)
+        return base64.b64encode(buffer).decode('utf-8')
+
+def obfuscate_for_llava(image, noise_level=0.05):
+    """
+    Obfuscate an input image for use with LLaVA-Med.
+    
+    :param image: string (base64 encoded image) or numpy array representing the image
+    :param noise_level: float, level of noise to add
+    :return: numpy array of the obfuscated image
+    """
+    obfuscator = ImageObfuscator(noise_level)
+    obfuscator.set_image(image)
+    obfuscator.add_noise()
+    return obfuscator.get_obfuscated_image()
 
 GB = 1 << 30
 
@@ -121,11 +258,68 @@ class ModelWorker:
 
     @torch.inference_mode()
     def generate_stream(self, params):
+        import os
+        import cv2
         tokenizer, model, image_processor = self.tokenizer, self.model, self.image_processor
 
         prompt = params["prompt"]
         ori_prompt = prompt
+
+        # Print original prompt
+        print("Original Prompt: ", ori_prompt)
+        
+        text_obfs = PersonalInfoMasker()
+        text_obfs.set_input_text(ori_prompt)
+        ori_prompt = text_obfs.process_text()
+    
+        
+        # Print obfuscated text
+        print("Obfuscated Prompt: ", ori_prompt)
+
+
+        # Handle images if provided
         images = params.get("images", None)
+        if images is not None:
+            # Create directory if it doesn't exist
+            image_dir = "images"
+            if not os.path.exists(image_dir):
+                os.makedirs(image_dir)
+            
+            for idx, image in enumerate(images):
+                # Save the original image
+                original_image_path = os.path.join(image_dir, f"original_image_{idx}.png")
+
+                # Check if the image is a NumPy array
+                if isinstance(image, np.ndarray):
+                    # Ensure the original image is in uint8 format
+                    if image.dtype != np.uint8:
+                        image = (image * 255).astype(np.uint8)
+                    
+                    # Save the original image
+                    cv2.imwrite(original_image_path, image)
+                    print(f"Original image saved at: {original_image_path}")
+                else:
+                    print(f"Image {idx} is not a valid NumPy array. Skipping...")
+
+                # Obfuscate the image
+                obfuscated_image = obfuscate_for_llava(image)
+
+                # Check if obfuscated_image is a NumPy array and save
+                if isinstance(obfuscated_image, np.ndarray):
+                    # Ensure the obfuscated image is in uint8 format
+                    if obfuscated_image.dtype != np.uint8:
+                        obfuscated_image = (obfuscated_image * 255).astype(np.uint8)
+
+                    # Save the obfuscated image
+                    obfuscated_image_path = os.path.join(image_dir, f"obfuscated_image_{idx}.png")
+                    cv2.imwrite(obfuscated_image_path, obfuscated_image)
+                    print(f"Obfuscated image saved at: {obfuscated_image_path}")
+                else:
+                    print(f"Obfuscated image {idx} is not a valid NumPy array. Skipping...")
+
+            # Print a message after obfuscation
+            print("Images have been obfuscated and saved.")
+        
         num_image_tokens = 0
         if images is not None and len(images) > 0 and self.is_multimodal:
             if len(images) > 0:
@@ -191,6 +385,7 @@ class ModelWorker:
                 generated_text = generated_text[:-len(stop_str)]
             yield json.dumps({"text": generated_text, "error_code": 0}).encode() + b"\0"
 
+        
     def generate_stream_gate(self, params):
         try:
             for x in self.generate_stream(params):
