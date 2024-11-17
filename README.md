@@ -24,16 +24,42 @@ This project extends LLaVA-Med with state-of-the-art privacy mechanisms for both
      pip install --upgrade pip  # enable PEP 660 support
      pip install -e .
      ```
-3. Install openai
-   ```sh
-     import openai
-     ```
-     If you are running a Python script and want to access the API key
-      ```sh
-     import os
-     api_key = os.getenv("OPENAI_API_KEY")
+**3. Setup OpenAI API key**
 
+* Once signed in on the [OpenAI Website](https://auth.openai.com/authorize?audience=https%3A%2F%2Fapi.openai.com%2Fv1&auth0Client=eyJuYW1lIjoiYXV0aDAtc3BhLWpzIiwidmVyc2lvbiI6IjEuMjEuMCJ9&client_id=DRivsnm2Mu42T3KOpqdtwB3NYviHYzwD&device_id=4007cf25-2dd4-41ef-9e7f-5b88d2849691&issuer=https%3A%2F%2Fauth.openai.com&max_age=0&nonce=SThCT1dvVnNyMENsLVo0S35yaFZEdjI5Qlh5cC5FRVV2bDBYR2dpMC1QQg%3D%3D&redirect_uri=https%3A%2F%2Fplatform.openai.com%2Fauth%2Fcallback&response_mode=query&response_type=code&scope=openid+profile+email+offline_access&screen_hint=signup&state=bjNuMjN1QUdBMVUtcmhpNWxaMC0wT2FXeUlVMkVLNEFHeVZ5SmFMVmx6OQ%3D%3D&flow=treatment), navigate to the [API Section](https://platform.openai.com/api-keys), and generate an API Key for GPT-3.5 turbo model.
+  
+* set the API key as an environment variable named
+   ```sh
+     OPENAI_API_KEY
      ```
+    * For Windows:
+
+      * Open command prompt and type
+         ```sh
+           setx OPENAI_API_KEY "your_openai_api_key_here"
+         ```
+    * For macOS/Linux:
+      
+       * Open the terminal and add this line to their ~/.bashrc, ~/.zshrc, or ~/.bash_profile file:
+         ```sh
+           export OPENAI_API_KEY="your_openai_api_key_here"
+         ```
+       * After adding run:
+         ```sh
+           source ~/.bashrc  # or source ~/.zshrc
+         ```
+
+* Verify the environment variable:
+
+  * Check if the environment variable is set correctly by running:
+    ```sh
+      import os
+      print(os.getenv("OPENAI_API_KEY"))
+    ```
+  * If the API key is printed, it is set up correctly.
+
+**You can now serve the model.**
+
 # Serving
 <a id="Serving"></a>
 ### Web UI
